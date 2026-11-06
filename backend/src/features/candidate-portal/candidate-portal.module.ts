@@ -12,6 +12,8 @@ import { CandidateCompanyController } from './controllers/candidate-company.cont
 import { CandidateCompanyService } from './services/candidate-company.service.js';
 import { CandidateCategoryCatalogController } from './controllers/candidate-category-catalog.controller.js';
 import { CandidateCategoryCatalogService } from './services/candidate-category-catalog.service.js';
+import { CandidateJobsController } from './controllers/candidate-jobs.controller.js';
+import { CandidateJobsService } from './services/candidate-jobs.service.js';
 
 @Module({
   imports: [AuthenticationModule, MatchingModule, QuickSearchModule],
@@ -22,12 +24,14 @@ import { CandidateCategoryCatalogService } from './services/candidate-category-c
     CandidatePipelineController,
     CandidateCompanyController,
     CandidateCategoryCatalogController,
+    CandidateJobsController,
   ],
   providers: [
     CandidateProfileService,
     CandidatePipelineService,
     CandidateCompanyService,
     CandidateCategoryCatalogService,
+    CandidateJobsService,
   ],
 })
 export class CandidatePortalModule {}

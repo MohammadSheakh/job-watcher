@@ -1,11 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsInt, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
-/** Keep personalized ranking responses small; the default matches the legacy dashboard. */
+/** Allows candidate dashboard to fetch crawled jobs, prioritizing profile matches on top. */
 export class CandidateRecommendationQueryDto {
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(20)
-  limit = 8;
+  @Max(100)
+  limit = 50;
 }
