@@ -45,3 +45,4 @@ export function detectAtsEndpoint(urlStr: string): AtsEndpoint | null {
     return null;
   }
 }
+
