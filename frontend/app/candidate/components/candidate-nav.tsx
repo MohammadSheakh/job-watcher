@@ -59,7 +59,10 @@ export function CandidateNav({ initialName }: { initialName?: string }) {
     <header className="border-b border-neutral-100 bg-white sticky top-0 z-30">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <Link href="/candidate" className="font-bold text-base tracking-tight text-neutral-950 hover:opacity-80 transition">
+          <Link
+            href="/candidate"
+            className="font-bold text-base tracking-tight text-neutral-950 hover:opacity-80 transition"
+          >
             Job Intelligence
           </Link>
           <span className="text-[10px] tracking-wider uppercase font-semibold text-neutral-400">
@@ -73,6 +76,12 @@ export function CandidateNav({ initialName }: { initialName?: string }) {
             className={`transition hover:text-black ${pathname === '/candidate' ? 'text-black font-semibold' : ''}`}
           >
             Overview
+          </Link>
+          <Link
+            href="/candidate/jobs"
+            className={`transition hover:text-black ${pathname.startsWith('/candidate/jobs') ? 'text-black font-semibold' : ''}`}
+          >
+            Jobs
           </Link>
           <Link
             href="/candidate/companies"

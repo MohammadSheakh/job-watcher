@@ -15,6 +15,7 @@
     "candidate:add": "tsx scripts/add-candidate.ts",
     "match:preview": "tsx scripts/match-preview.ts",
     "notify:daily": "tsx scripts/notify-daily.ts",
+    "jobs:cleanup-stale": "tsx scripts/cleanup-stale-jobs.ts",
     "settings:set": "tsx scripts/set-setting.ts",
     "admin": "tsx src/admin/server.ts",
     "categories:enrich": "tsx scripts/enrich-categories.ts",

@@ -3,7 +3,7 @@ import { PrismaService } from '@app/database';
 import { classifyJobCategories } from '../domain/job-category-classifier.js';
 import { parseCareerPage } from '../domain/career-page.parser.js';
 import { createJobHash, normalizeLocation, normalizeTitle } from '../domain/normalize.js';
-import type { CareerPage } from '../domain/types.js';
+import type { CareerPage, CrawlResult } from '../domain/types.js';
 
 /** Persists a parsed career page atomically; fetching and scheduling belong to the caller. */
 @Injectable()
@@ -11,22 +11,38 @@ export class CrawlIngestionService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Parse before opening the transaction. Upsert at most 150 jobs using legacy hashes,
+   * Parse before opening the transaction (or ingest pre-parsed CrawlResult directly).
+   * Upsert at most 150 jobs using legacy hashes,
    * then commit the company check timestamp and success log with the same writes.
    * An empty/no-openings result never closes existing jobs after one missing crawl.
    */
-  async ingest(companyId: string, page: CareerPage) {
-    const result = parseCareerPage(companyId, page);
+  async ingest(companyId: string, pageOrResult: CareerPage | CrawlResult) {
+    const result: CrawlResult =
+      'jobs' in pageOrResult ? pageOrResult : parseCareerPage(companyId, pageOrResult);
     const checkedAt = new Date();
+    let jobsCreated = 0;
+    let jobsUpdated = 0;
+    let jobsClosed = 0;
     await this.prisma.$transaction(
       async (transaction) => {
-        // Updating first serializes persistence for this company without holding a lock during HTTP.
-        const company = await transaction.company.updateMany({
-          where: { id: companyId, active: true, recommended_action: 'MONITOR_READY' },
+        // Query company first to capture prior crawl timestamp for reconciliation
+        const existingCompany = await transaction.company.findUnique({
+          where: { id: companyId },
+          select: { id: true, active: true, recommended_action: true, last_checked_at: true },
+        });
+        if (
+          !existingCompany ||
+          !existingCompany.active ||
+          existingCompany.recommended_action !== 'MONITOR_READY'
+        ) {
+          throw new NotFoundException('Company is not available for monitoring.');
+        }
+        const prevCheckedAt = existingCompany.last_checked_at;
+
+        await transaction.company.update({
+          where: { id: companyId },
           data: { last_checked_at: checkedAt },
         });
-        if (company.count !== 1)
-          throw new NotFoundException('Company is not available for monitoring.');
         const jobHashes = result.jobs.map((job) => createJobHash(job));
         const existingJobRows = jobHashes.length
           ? await transaction.job.findMany({
@@ -35,8 +51,8 @@ export class CrawlIngestionService {
             })
           : [];
         const existingSet = new Set(existingJobRows.map((r) => r.jobHash));
-        let jobsCreated = 0;
-        let jobsUpdated = 0;
+        jobsCreated = 0;
+        jobsUpdated = 0;
 
         const allCategories = transaction.category
           ? await transaction.category.findMany({ select: { id: true, name: true } })
@@ -124,18 +140,56 @@ export class CrawlIngestionService {
             }
           }
         }
+
+        jobsClosed = 0;
+        // Reconciliation Sweep:
+        // If this company has a prior check timestamp (prevCheckedAt), any job whose last_seen_at
+        // is older than prevCheckedAt was absent in BOTH the prior crawl and today's crawl (2 consecutive strikes).
+        // Automatically close it to eliminate ghost vacancies.
+        if (prevCheckedAt) {
+          const reconcile = await transaction.job.updateMany({
+            where: {
+              companyId,
+              status: 'OPEN',
+              last_seen_at: { lt: prevCheckedAt },
+            },
+            data: {
+              status: 'CLOSED',
+            },
+          });
+          jobsClosed += reconcile.count;
+        }
+
+        // If the career page explicitly declared no current openings, close any jobs not seen today
+        if (result.noOpeningsSignal) {
+          const reconcileNoOpenings = await transaction.job.updateMany({
+            where: {
+              companyId,
+              status: 'OPEN',
+              last_seen_at: { lt: checkedAt },
+            },
+            data: {
+              status: 'CLOSED',
+            },
+          });
+          jobsClosed += reconcileNoOpenings.count;
+        }
+
+        const actionTaken =
+          jobsClosed > 0 ? `MONITOR_READY (${jobsClosed} closed)` : 'MONITOR_READY';
+
         await transaction.crawlLog.create({
           data: {
             company_id: companyId,
             checked_at: checkedAt,
             success: true,
             jobs_found: result.jobs.length,
-            http_status: page.httpStatus,
-            duration_ms: page.durationMs ?? null,
-            crawler_type: page.crawlerType ?? 'Generic HTML',
+            http_status: result.httpStatus,
+            duration_ms: result.durationMs ?? null,
+            crawler_type: result.crawlerType ?? 'Generic HTML',
             jobs_created: jobsCreated,
-            jobs_updated: jobsUpdated,
-            action_taken: 'MONITOR_READY',
+            jobs_updated: jobsUpdated + jobsClosed,
+            action_taken: actionTaken,
           },
         });
       },
@@ -144,13 +198,16 @@ export class CrawlIngestionService {
     return {
       companyId,
       jobsFound: result.jobs.length,
+      jobsCreated,
+      jobsUpdated,
+      jobsClosed,
       checkedAt: checkedAt.toISOString(),
       finalUrl: result.finalUrl,
       httpStatus: result.httpStatus,
       pageHash: result.pageHash,
       noOpeningsSignal: result.noOpeningsSignal,
-      durationMs: page.durationMs,
-      crawlerType: page.crawlerType ?? 'Generic HTML',
+      durationMs: result.durationMs,
+      crawlerType: result.crawlerType ?? 'Generic HTML',
     };
   }
 

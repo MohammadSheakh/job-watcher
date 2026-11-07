@@ -19,7 +19,7 @@ This guide provides the complete set of commands, configuration instructions, an
 
 ## 1. Architecture & Port Allocation
 
-The system consists of 4 primary decoupled services:
+The system consists of decoupled services orchestrated with Docker Compose:
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
@@ -28,7 +28,7 @@ The system consists of 4 primary decoupled services:
                                │
                ┌───────────────┴───────────────┐
                ▼                               ▼
-     Port 3000 (HTTP)                Port 4000 (HTTP/JSON)
+     Port 3003 (Docker) / 3000 (Dev)  Port 4000 (HTTP/JSON)
 ┌─────────────────────────────┐ ┌─────────────────────────────┐
 │      Next.js Frontend       │ │      NestJS API Backend     │
 │   (App Router, SSR, UI)     │ │  (Rate Limiting, Logic, DB) │
@@ -43,13 +43,14 @@ The system consists of 4 primary decoupled services:
 └─────────────────────────────┘                 └─────────────────────────────┘
 ```
 
-| Service | Container Name | Port (Host:Container) | Healthcheck |
+| Service | Container Name | Port (Host:Container) | Healthcheck / Role |
 | :--- | :--- | :--- | :--- |
-| **Next.js Frontend** | `frontend` | `3000:3000` | HTTP GET `/` (returns 200) |
-| **NestJS Backend** | `backend` | `4000:4000` | HTTP GET `/api/v1/admin/settings` (returns 401/200) |
-| **Redis 7** | `redis` | `6379:6379` | `redis-cli ping` (returns PONG) |
+| **Next.js Frontend** | `frontend` | `127.0.0.1:3003:3003` | HTTP GET `/` (returns 200) · `${FRONTEND_PORT:-3003}` |
+| **NestJS Backend** | `backend` | `127.0.0.1:4000:4000` | HTTP GET `/api/v1/admin/settings` (returns 401/200) · `${BACKEND_PORT:-4000}` |
+| **Redis 7** | `redis` | `6379:6379` (internal) | `redis-cli ping` (returns PONG) |
 | **Local PostgreSQL 16** | `db` *(Local compose only)* | `5432:5432` | `pg_isready -U jobapp -d job_intelligence` |
 | **Scheduler Daemon** | `scheduler` | Internal | Controlled by backend health dependency |
+| **Cloudflare Tunnel** | `cloudflared` | Outbound Egress | Optional Zero Trust tunnel (`CLOUDFLARE_TUNNEL_TOKEN`) |
 
 ---
 
@@ -93,9 +94,14 @@ CANDIDATE_SESSION_SECRET=generate-a-strong-random-64-character-hex-string
 COOKIE_SECURE=true
 FRONTEND_ORIGIN=https://your-domain.com
 
-# Frontend API Endpoint
+# Frontend Host & Port
 NEXT_PUBLIC_API_URL=https://your-domain.com/api/v1
-PORT=3000
+FRONTEND_PORT=3003
+FRONTEND_BIND_IP=127.0.0.1
+PORT=3003
+
+# Cloudflare Tunnel (Optional)
+CLOUDFLARE_TUNNEL_TOKEN=
 
 # Background Scheduler
 TZ=Asia/Dhaka
@@ -117,8 +123,11 @@ docker compose -f compose.neon.yaml config --quiet
 
 ### 2. Build and Start All Services
 ```bash
-# Builds images with cached layers and starts containers detached
+# Builds images with cached layers and starts containers detached:
 docker compose -f compose.neon.yaml up --build -d
+
+# NOTE: If you are NOT using a Cloudflare Tunnel token, scale cloudflared to 0 to avoid restart loops:
+docker compose -f compose.neon.yaml up --build -d --scale cloudflared=0
 ```
 
 ### 3. Check Service Status & Health
@@ -162,7 +171,7 @@ docker compose up --build -d
 ```bash
 docker compose ps
 ```
-
+/candidate/jobs
 ### 3. Stop Local Stack
 ```bash
 docker compose down
@@ -267,17 +276,28 @@ curl -I http://127.0.0.1:4000/api/v1/admin/settings
 
 ### 3. Frontend Landing Gateway Probe
 ```bash
+# For Docker Compose (default port 3003):
+curl -I http://127.0.0.1:3003/
+# Expected: HTTP/1.1 200 OK
+
+# For host development (default port 3000):
 curl -I http://127.0.0.1:3000/
 # Expected: HTTP/1.1 200 OK
 ```
 
 ### 4. Browser Smoke Test
-Open your browser to:
-- **Landing Gateway**: `http://localhost:3000/`
-- **Candidate Workspace**: `http://localhost:3000/candidate/login`
+Open your browser to (use `:3003` for Docker Compose, `:3000` for host development):
+- **Landing Gateway**: `http://localhost:3003/`
+- **Candidate Dashboard**: `http://localhost:3003/candidate`
+- **Candidate Jobs Explorer & Categories**: `http://localhost:3003/candidate/jobs`
+- **Candidate Company Directory**: `http://localhost:3003/candidate/companies`
+- **Candidate Pipeline Tracker**: `http://localhost:3003/candidate/pipeline`
+- **Candidate Profile Tuning**: `http://localhost:3003/candidate/profile`
+- **Candidate Login**: `http://localhost:3003/candidate/login`
   - *Login credentials*: Active candidate email + default password (`asdfasdf`).
-- **Operations Console**: `http://localhost:3000/admin`
+- **Operations Console**: `http://localhost:3003/admin`
   - *Admin credentials*: HTTP Basic Auth (`admin` / `asdfasdf` or configured values).
+- **Backend API**: `http://localhost:4000/api/v1`
 
 ---
 

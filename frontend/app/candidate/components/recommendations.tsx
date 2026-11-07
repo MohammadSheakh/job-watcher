@@ -19,6 +19,7 @@ interface Recommendation {
   reasons: string[];
   categories: string[];
   trackingStatus: string | null;
+  isMatch?: boolean;
 }
 
 function formatDate(iso: string): string {
@@ -42,10 +43,11 @@ function webUrl(value: string | null): string | undefined {
   }
 }
 
-/** Load personalized results after the parent has resolved the candidate session. */
+/** Load all crawled jobs with preference matches placed at top. */
 export function Recommendations() {
   const router = useRouter();
   const [rows, setRows] = useState<Recommendation[]>([]);
+  const [filterMode, setFilterMode] = useState<'all' | 'matches'>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -55,7 +57,7 @@ export function Recommendations() {
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    api<Recommendation[]>('/candidate/recommendations', { signal: controller.signal })
+    api<Recommendation[]>('/candidate/recommendations?limit=50', { signal: controller.signal })
       .then((results) => {
         if (!controller.signal.aborted) setRows(results);
       })
@@ -101,55 +103,113 @@ export function Recommendations() {
     }
   }
 
+  const matchCount = rows.filter((r) => r.isMatch || r.score > 0).length;
+  const displayedRows =
+    filterMode === 'matches' ? rows.filter((r) => r.isMatch || r.score > 0) : rows;
+
   return (
     <section aria-labelledby="recommendations-heading" className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-wider font-bold text-neutral-400 mb-0.5">Recommendations</p>
-          <h2 id="recommendations-heading" className="text-xl font-bold tracking-tight text-neutral-950">
-            Best current matches
+          <p className="text-[11px] uppercase tracking-wider font-bold text-neutral-400 mb-0.5">
+            Discovered Openings
+          </p>
+          <h2
+            id="recommendations-heading"
+            className="text-xl font-bold tracking-tight text-neutral-950"
+          >
+            Crawled Jobs & Matches
           </h2>
+          <p className="text-xs text-neutral-500 mt-0.5">
+            Showing all openings found in crawling · Preference matches prioritized at the top
+          </p>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick Filter toggle */}
+          <div className="inline-flex rounded-full border border-neutral-200 p-0.5 bg-neutral-50 text-xs">
+            <button
+              type="button"
+              onClick={() => setFilterMode('all')}
+              className={`px-3 py-1 rounded-full font-medium transition cursor-pointer ${
+                filterMode === 'all'
+                  ? 'bg-black text-white shadow-none'
+                  : 'text-neutral-600 hover:text-black'
+              }`}
+            >
+              All Openings ({rows.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterMode('matches')}
+              className={`px-3 py-1 rounded-full font-medium transition cursor-pointer ${
+                filterMode === 'matches'
+                  ? 'bg-black text-white shadow-none'
+                  : 'text-neutral-600 hover:text-black'
+              }`}
+            >
+              Matches ({matchCount})
+            </button>
+          </div>
+
+          <Link href="/candidate/jobs" className="btn-pill-primary text-xs px-3.5 py-1.5">
+            Explore All in Jobs ↗
+          </Link>
           <button
             type="button"
-            className="btn-pill-secondary text-xs px-3.5 py-1.5"
+            className="btn-pill-secondary text-xs px-3 py-1.5"
             disabled={loading || saving}
             onClick={() => setRevision((value) => value + 1)}
           >
             Refresh
           </button>
-          <Link href="/candidate/profile" className="btn-pill-secondary text-xs px-4 py-1.5">
-            Tune profile
-          </Link>
         </div>
       </div>
 
       {error && (
-        <div className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl" role="alert">
+        <div
+          className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl"
+          role="alert"
+        >
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="py-10 text-center text-sm text-neutral-400">Finding your best matches…</div>
-      ) : rows.length === 0 ? (
-        <div className="py-12 text-center text-sm text-neutral-400">
-          No current jobs meet your match threshold. Run a Quick Search or adjust your profile.
+        <div className="py-10 text-center text-sm text-neutral-400">Loading discovered jobs…</div>
+      ) : displayedRows.length === 0 ? (
+        <div className="py-12 text-center text-sm text-neutral-400 border border-neutral-100 rounded-2xl">
+          {filterMode === 'matches'
+            ? 'No current jobs meet your match threshold. Click "All Openings" to view all discovered jobs, or explore the Jobs catalog.'
+            : 'No jobs found in crawling yet. Run a Quick Search or wait for the next scheduled crawler run.'}
         </div>
       ) : (
         <div className="grid gap-4">
-          {rows.map((row) => {
+          {displayedRows.map((row) => {
             const website = webUrl(row.companyWebsiteUrl);
             const application = webUrl(row.applicationUrl);
+            const isMatch = Boolean(row.isMatch || row.score > 0);
+
             return (
               <article
-                className="p-5 rounded-2xl border border-neutral-100 hover:border-neutral-200 bg-white transition space-y-3"
+                className={`p-5 rounded-2xl border transition space-y-3 bg-white ${
+                  isMatch
+                    ? 'border-neutral-200 hover:border-neutral-300'
+                    : 'border-neutral-100 hover:border-neutral-200'
+                }`}
                 key={row.jobId}
               >
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                   <div>
-                    <h3 className="text-base font-bold text-neutral-900 leading-snug">{row.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-neutral-900 leading-snug">
+                        {row.title}
+                      </h3>
+                      {isMatch && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          Profile Match
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 text-xs text-neutral-500 mt-0.5">
                       {website ? (
                         <a
@@ -174,9 +234,15 @@ export function Recommendations() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="badge-neutral text-xs font-semibold">
-                      Match: {row.score}%
-                    </span>
+                    {isMatch ? (
+                      <span className="badge-success text-xs font-semibold">
+                        Match: {row.score}%
+                      </span>
+                    ) : (
+                      <span className="badge-neutral text-xs font-medium text-neutral-500">
+                        Crawled Opening
+                      </span>
+                    )}
                     {row.trackingStatus && (
                       <span
                         className={

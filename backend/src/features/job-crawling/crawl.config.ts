@@ -1,5 +1,10 @@
-/** Validate legacy worker controls before scheduling network work. */
-export function crawlConfig(): { delayMs: number; limit: number | undefined } {
+/** Validate worker controls before scheduling network work. */
+export function crawlConfig(): {
+  delayMs: number;
+  domainDelayMs: number;
+  concurrency: number;
+  limit: number | undefined;
+} {
   const integer = (key: string, fallback: number, min: number, max: number): number => {
     const raw = process.env[key];
     const value = raw === undefined ? fallback : Number(raw);
@@ -8,7 +13,9 @@ export function crawlConfig(): { delayMs: number; limit: number | undefined } {
     return value;
   };
   return {
-    delayMs: integer('CRAWL_DELAY_MS', 750, 0, 60000),
+    delayMs: integer('CRAWL_DELAY_MS', 0, 0, 60000),
+    domainDelayMs: integer('CRAWL_DOMAIN_DELAY_MS', 500, 0, 10000),
+    concurrency: integer('CRAWL_CONCURRENCY', 5, 1, 25),
     limit: process.env.CRAWL_LIMIT === undefined ? undefined : integer('CRAWL_LIMIT', 1, 1, 100000),
   };
 }

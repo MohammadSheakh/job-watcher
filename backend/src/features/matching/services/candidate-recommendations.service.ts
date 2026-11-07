@@ -18,6 +18,7 @@ export interface CandidateRecommendation {
   categories: string[];
   trackingStatus: string | null;
   aiUsed?: boolean;
+  isMatch?: boolean;
 }
 
 /** Rank existing OPEN jobs with deterministic scoring and optional AI match enhancement. */
@@ -145,7 +146,7 @@ export class CandidateRecommendationsService {
         if (enhancer && result.eligible) {
           result = await enhancer(profile, jobForMatch, result);
         }
-        if (!result.eligible || result.finalScore < candidate.minimum_match_score) continue;
+        const isMatch = result.eligible && result.finalScore >= candidate.minimum_match_score;
         best.push({
           jobId: job.id.toString(),
           companyId: job.companyId,
@@ -156,14 +157,22 @@ export class CandidateRecommendationsService {
           workMode: job.work_mode,
           applicationUrl: job.application_url ?? company.careerUrl ?? company.website_url,
           applicationDeadline: job.application_deadline?.toISOString() ?? null,
-          score: result.finalScore,
-          reasons: result.reasons.slice(0, 3),
+          score: result.eligible ? result.finalScore : 0,
+          reasons: isMatch ? result.reasons.slice(0, 3) : [],
           categories: names.slice(0, 5),
           trackingStatus,
           aiUsed: result.aiUsed,
+          isMatch,
         });
-        // The requested list is at most 20; keeping it sorted avoids retaining all matches.
-        best.sort((a, b) => b.score - a.score || (BigInt(a.jobId) > BigInt(b.jobId) ? -1 : 1));
+        // Sort matches to the top by score, followed by other crawled jobs by recency.
+        best.sort((a, b) => {
+          if (a.isMatch && !b.isMatch) return -1;
+          if (!a.isMatch && b.isMatch) return 1;
+          if (a.isMatch && b.isMatch) {
+            return b.score - a.score || (BigInt(a.jobId) > BigInt(b.jobId) ? -1 : 1);
+          }
+          return BigInt(a.jobId) > BigInt(b.jobId) ? -1 : 1;
+        });
         if (best.length > limit) best.pop();
       }
       if (jobs.length < batchSize || totalScanned >= maxScan) break;

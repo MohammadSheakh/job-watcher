@@ -62,7 +62,7 @@ cp .env.example .env
 | `ADMIN_PASSWORD` | `asdfasdf` | HTTP Basic Auth password for operations console. |
 | `DEFAULT_CANDIDATE_PASSWORD` | `asdfasdf` | Default initial password for seeded candidate accounts. |
 | `CANDIDATE_SESSION_SECRET` | `local-development-session-secret-2026-change-before-production` | Secret key used to sign HMAC session tokens. |
-| `FRONTEND_ORIGIN` | `http://localhost:3000` | Allowed CORS origin for frontend client requests. |
+| `FRONTEND_ORIGIN` | `http://localhost:3000` | Allowed CORS origin for frontend client requests (`3000` for local dev, `3003` for Docker). |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4000/api/v1` | Base API URL called by the Next.js frontend. |
 
 Verify your environment configuration:
@@ -198,8 +198,14 @@ pnpm dev:frontend
 cd frontend && pnpm dev
 ```
 - **Landing Gateway**: `http://localhost:3000/`
+- **Candidate Dashboard**: `http://localhost:3000/candidate`
+- **Candidate Jobs Explorer & Categories**: `http://localhost:3000/candidate/jobs`
+- **Candidate Companies**: `http://localhost:3000/candidate/companies`
+- **Candidate Pipeline Tracker**: `http://localhost:3000/candidate/pipeline`
+- **Candidate Profile Tuning**: `http://localhost:3000/candidate/profile`
 - **Candidate Login**: `http://localhost:3000/candidate/login`
-- **Operations Console**: `http://localhost:3000/admin`
+- **Operations Console (Admin)**: `http://localhost:3000/admin`
+*(Note: When running with Docker Compose instead of local dev, frontend is served at `http://localhost:3003`)*
 
 ---
 
@@ -222,14 +228,11 @@ The codebase implements a comprehensive 5-layer testing pyramid. All tests run f
 ### Detailed Test Execution:
 
 #### 1. Unit & Component Integration Tests (`Layer 1`)
-Runs 16 suites / 125 tests using in-memory execution in ~5-6 seconds:
+Runs 9 test suites / 50 unit tests using in-memory execution in ~5-6 seconds:
 ```bash
-pnpm test:backend
-
-# Or run specific test slices:
 pnpm test:unit
-pnpm test:integration
 ```
+*(Tests cover CandidateJobsService, Matcher, JobCategoryClassifier, CareerPageParser, LinkedInParser, PasswordService, EmailRender, BigIntSerializer, and RateLimitGuard).*
 
 #### 2. Real Database Integration Tests (`Layer 2`)
 Automatically spins up a disposable Docker container running PostgreSQL 16, creates tables, executes transactions, tests concurrency locking, and destroys the container:
@@ -305,6 +308,9 @@ node backend/dist/src/commands/crawl-daily.js --help
 # Test crawler on pilot/sample companies:
 pnpm crawl:pilot
 
+# Run LinkedIn company enrichment crawler (website & career page extraction):
+pnpm crawl:linkedin
+
 # Run a crawler dry run (does not persist to DB):
 pnpm crawl:dry
 
@@ -324,15 +330,16 @@ pnpm prd-audit
 
 ## 10. Troubleshooting Common Issues
 
-### Issue 1: Port Already in Use (4000 or 3000)
+### Issue 1: Port Already in Use (4000, 3000, or 3003)
 Find and terminate any orphaned processes:
 ```bash
 # Check for process on port 4000 (backend):
 lsof -i :4000
 kill -9 <PID>
 
-# Check for process on port 3000 (frontend):
+# Check for process on port 3000 (frontend local dev) or 3003 (Docker frontend):
 lsof -i :3000
+lsof -i :3003
 kill -9 <PID>
 ```
 

@@ -47,6 +47,136 @@ describe('Pure domain career page parser (career-page.parser.ts)', () => {
     expect(backendJob?.deadline?.toISOString()).toContain('2026-12-31');
   });
 
+  it('extracts Schema.org JSON-LD JobPosting metadata with high precision', () => {
+    const html = `
+      <html>
+        <head>
+          <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "JobPosting",
+            "title": "Principal Cloud Architect",
+            "description": "Leading cloud migration initiatives across EMEA.",
+            "validThrough": "2026-12-31T23:59:59Z",
+            "jobLocation": {
+              "@type": "Place",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Dhaka",
+                "addressCountry": "Bangladesh"
+              }
+            },
+            "url": "https://example.com/careers/cloud-architect"
+          }
+          </script>
+        </head>
+        <body>
+          <h1>Careers</h1>
+        </body>
+      </html>
+    `;
+
+    const page: CareerPage = {
+      requestedUrl,
+      finalUrl,
+      httpStatus: 200,
+      html,
+    };
+
+    const result = parseCareerPage(companyId, page);
+    expect(result.jobs.length).toBe(1);
+    const job = result.jobs[0];
+    expect(job.title).toBe('Principal Cloud Architect');
+    expect(job.applicationUrl).toBe('https://example.com/careers/cloud-architect');
+    expect(job.location).toContain('Dhaka');
+    expect(job.description).toContain('Leading cloud migration');
+    expect(job.deadline).toBeInstanceOf(Date);
+  });
+
+  it('supports single-page listings without separate pages using anchor hashes and vacancy cues', () => {
+    const html = `
+      <html>
+        <body>
+          <section>
+            <h2>Current Openings</h2>
+            <div id="role-fullstack" class="job-card">
+              <h3>Fullstack Software Engineer</h3>
+              <p>Experience: 4+ years in Node.js and React</p>
+              <a href="#role-fullstack" class="btn">Apply Here</a>
+            </div>
+          </section>
+        </body>
+      </html>
+    `;
+
+    const page: CareerPage = {
+      requestedUrl,
+      finalUrl,
+      httpStatus: 200,
+      html,
+    };
+
+    const result = parseCareerPage(companyId, page);
+    expect(result.jobs.length).toBe(1);
+    expect(result.jobs[0].title).toBe('Fullstack Software Engineer');
+    expect(result.jobs[0].applicationUrl).toBe('https://example.com/careers#role-fullstack');
+  });
+
+  it('strictly rejects company descriptions, founder bios, and perks paragraphs from becoming fake jobs', () => {
+    const html = `
+      <html>
+        <body>
+          <div class="careers-about">
+            <h2>Current Openings</h2>
+            <p>Our company was founded by an experienced software engineer and lead designer. We are looking for talented people.</p>
+            <div class="perks">
+              <p>Perks: Continuous mentorship from senior architect colleagues.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const page: CareerPage = {
+      requestedUrl,
+      finalUrl,
+      httpStatus: 200,
+      html,
+    };
+
+    const result = parseCareerPage(companyId, page);
+    expect(result.jobs).toEqual([]);
+  });
+
+  it('strictly rejects service pricing / SLA tables from becoming fake vacancies', () => {
+    const html = `
+      <html>
+        <body>
+          <table>
+            <tr>
+              <td>Enterprise Support Specialist</td>
+              <td>24/7 dedicated support phone line</td>
+            </tr>
+            <tr>
+              <td>Database Administrator Services</td>
+              <td>High availability managed cluster</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const page: CareerPage = {
+      requestedUrl,
+      finalUrl,
+      httpStatus: 200,
+      html,
+    };
+
+    const result = parseCareerPage(companyId, page);
+    expect(result.jobs).toEqual([]);
+  });
+
   it('detects explicit "no current openings" signal and returns empty jobs list', () => {
     const html = `
       <html>
