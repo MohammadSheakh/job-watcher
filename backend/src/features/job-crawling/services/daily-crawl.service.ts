@@ -13,7 +13,15 @@ export interface DailyCrawlSummary {
   limitReached: boolean;
 }
 
-/** Executes one bounded, paced sweep; an external scheduler owns the daily trigger. */
+function getDomain(urlStr: string): string {
+  try {
+    return new URL(urlStr).hostname.toLowerCase();
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Executes bounded, paced sweeps with concurrent domain-aware workers. */
 @Injectable()
 export class DailyCrawlService {
   private readonly logger = new Logger(DailyCrawlService.name);
@@ -23,7 +31,10 @@ export class DailyCrawlService {
     private readonly companies: CompanyCrawlService,
   ) {}
 
-  /** Process sequentially, stop at company boundaries, and release run ownership in every exit path. */
+  /**
+   * Process companies concurrently with domain-aware pacing,
+   * stop at company boundaries, and release run ownership in every exit path.
+   */
   async run(signal: AbortSignal): Promise<DailyCrawlSummary> {
     const summary: DailyCrawlSummary = {
       status: 'completed',
@@ -36,45 +47,77 @@ export class DailyCrawlService {
     if (this.running) return { ...summary, status: 'already-running' };
     this.running = true;
     let acquired = false;
+
     try {
       const config = crawlConfig();
       acquired = await this.repository.acquireRunLock();
       if (!acquired) return { ...summary, status: 'already-running' };
       const upperId = await this.repository.getUpperId();
       let afterId: string | undefined;
+
+      const domainLastPaced = new Map<string, number>();
+      const domainDelay = Math.max(config.domainDelayMs, config.delayMs);
+
       while (upperId && !signal.aborted && !summary.limitReached) {
         await this.repository.assertRunLock();
         const batch = await this.repository.findBatch(upperId, afterId);
         if (!batch.length) break;
-        for (const company of batch) {
-          if (signal.aborted || summary.limitReached) break;
-          afterId = company.id;
-          if (!company.careerUrl.trim()) {
-            summary.skipped += 1;
-            continue;
+
+        // Process batch using worker pool bounded by concurrency
+        let cursor = 0;
+        const workerCount = Math.min(config.concurrency, batch.length);
+
+        const runWorker = async () => {
+          while (cursor < batch.length) {
+            if (signal.aborted || summary.limitReached) break;
+            const companyIndex = cursor++;
+            const company = batch[companyIndex];
+            if (!company) break;
+
+            if (!company.careerUrl.trim()) {
+              summary.skipped += 1;
+              continue;
+            }
+
+            // Domain-aware pacing: prevent hammering identical domains simultaneously
+            const domain = getDomain(company.careerUrl);
+            const lastTime = domainLastPaced.get(domain) ?? 0;
+            const elapsed = Date.now() - lastTime;
+            if (elapsed < domainDelay) {
+              try {
+                await delay(domainDelay - elapsed, undefined, { signal });
+              } catch {
+                if (signal.aborted) break;
+              }
+            }
+            domainLastPaced.set(domain, Date.now());
+
+            if (signal.aborted || summary.limitReached) break;
+
+            await this.repository.assertRunLock();
+            const outcome = await this.companies.crawl(company, () =>
+              this.repository.assertRunLock(),
+            );
+
+            summary.checked += 1;
+            summary.limitReached = config.limit !== undefined && summary.checked >= config.limit;
+            summary.jobsFound += outcome.jobsFound;
+            if (!outcome.success) summary.failed += 1;
+
+            this.logger.log({
+              checked: summary.checked,
+              success: outcome.success,
+              errorCode: outcome.errorCode,
+            });
           }
-          await this.repository.assertRunLock();
-          const outcome = await this.companies.crawl(company, () =>
-            this.repository.assertRunLock(),
-          );
-          summary.checked += 1;
-          summary.limitReached = config.limit !== undefined && summary.checked >= config.limit;
-          summary.jobsFound += outcome.jobsFound;
-          if (!outcome.success) summary.failed += 1;
-          // Only counters and stable error codes enter logs, never remote URLs or response content.
-          this.logger.log({
-            checked: summary.checked,
-            success: outcome.success,
-            errorCode: outcome.errorCode,
-          });
-          try {
-            await delay(config.delayMs, undefined, { signal });
-          } catch (error) {
-            if (!signal.aborted) throw error;
-          }
-        }
+        };
+
+        await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+
+        afterId = batch[batch.length - 1].id;
         if (batch.length < 50) break;
       }
+
       if (signal.aborted) summary.status = 'stopped';
       return summary;
     } finally {

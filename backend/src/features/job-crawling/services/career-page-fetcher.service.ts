@@ -36,7 +36,7 @@ export class CareerPageFetcherService {
    * Workers must apply their own distributed concurrency policy before scheduling calls.
    */
   async fetch(careerUrl: string): Promise<CareerPage> {
-    if (this.active >= 4) throw new CrawlTransportError('CAPACITY', 'Crawler transport is busy.');
+    if (this.active >= 20) throw new CrawlTransportError('CAPACITY', 'Crawler transport is busy.');
     this.active += 1;
     const started = performance.now();
     const controller = new AbortController();
@@ -87,6 +87,44 @@ export class CareerPageFetcherService {
         );
       if (error instanceof CrawlTransportError)
         throw new CrawlTransportError(error.code, error.message, error.status, durationMs);
+
+      const err = error as NodeJS.ErrnoException;
+      if (err?.code === 'CERT_HAS_EXPIRED') {
+        throw new CrawlTransportError(
+          'SSL_CERT_EXPIRED',
+          'Career page SSL certificate has expired.',
+          undefined,
+          durationMs,
+        );
+      }
+      if (
+        err?.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+        err?.code === 'DEPTH_ZERO_SELF_SIGNED_CERT'
+      ) {
+        throw new CrawlTransportError(
+          'SSL_CERT_INVALID',
+          'Career page SSL certificate is invalid.',
+          undefined,
+          durationMs,
+        );
+      }
+      if (err?.code === 'ENOTFOUND' || err?.code === 'ECONNREFUSED') {
+        throw new CrawlTransportError(
+          'DEAD_DOMAIN',
+          'Career page domain is unreachable.',
+          undefined,
+          durationMs,
+        );
+      }
+      if (err?.code === 'ECONNRESET') {
+        throw new CrawlTransportError(
+          'NETWORK_RESET',
+          'Career page connection was reset.',
+          undefined,
+          durationMs,
+        );
+      }
+
       throw new CrawlTransportError(
         'NETWORK_FAILURE',
         'Career page connection failed.',
@@ -192,9 +230,21 @@ export class CareerPageFetcherService {
           checkServerIdentity: (_host, cert) => checkServerIdentity(hostname, cert),
           headers: {
             host: url.host,
-            accept: 'text/html,application/xhtml+xml',
+            'user-agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+            accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'en-US,en;q=0.9',
             'accept-encoding': 'gzip, deflate, br, identity',
-            'user-agent': 'JobIntelligenceBot/0.4 (+daily-career-monitor)',
+            'cache-control': 'max-age=0',
+            'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'none',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
           },
         },
         (response) => {
@@ -223,6 +273,20 @@ export class CareerPageFetcherService {
               );
             else resolve({ status, location, html: '' });
             return;
+          }
+          if (status === 403 || status === 503) {
+            const cfRay = response.headers['cf-ray'];
+            const server = String(response.headers['server'] || '').toLowerCase();
+            if (cfRay || server.includes('cloudflare')) {
+              stop(
+                new CrawlTransportError(
+                  'WAF_CHALLENGE',
+                  'Career page protected by Cloudflare bot defense.',
+                  status,
+                ),
+              );
+              return;
+            }
           }
           if (status < 200 || status >= 300) {
             stop(

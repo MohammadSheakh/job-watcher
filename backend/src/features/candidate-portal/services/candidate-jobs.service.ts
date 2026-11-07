@@ -261,7 +261,7 @@ export class CandidateJobsService {
     }
 
     const matchedCount = mapped.filter((j) => j.isMatch).length;
-    let filtered = query.matchedOnly ? mapped.filter((j) => j.isMatch) : mapped;
+    const filtered = query.matchedOnly ? mapped.filter((j) => j.isMatch) : mapped;
 
     // Sorting
     if (query.sortBy === 'recent') {

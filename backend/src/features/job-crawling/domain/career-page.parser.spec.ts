@@ -1,4 +1,4 @@
-import { parseCareerPage, extractSchemaOrgJobs } from './career-page.parser.js';
+import { parseCareerPage } from './career-page.parser.js';
 import type { CareerPage } from './types.js';
 
 describe('Pure domain career page parser (career-page.parser.ts)', () => {

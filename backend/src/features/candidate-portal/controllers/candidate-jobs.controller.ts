@@ -23,7 +23,12 @@ export class CandidateJobsController {
   /** Return filtered, candidate-matched crawled jobs catalog. */
   @Get()
   @Header('Cache-Control', 'private, no-store')
-  list(@Req() request: CandidateRequest, @Query() query: CandidateJobsQueryDto) {
+  list(
+    @Req()
+    request: CandidateRequest,
+    @Query()
+    query: CandidateJobsQueryDto,
+  ) {
     return this.candidateJobs.list(request.candidate.id, query);
   }
 }

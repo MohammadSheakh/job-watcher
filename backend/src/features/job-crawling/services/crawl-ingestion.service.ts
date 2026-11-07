@@ -3,7 +3,7 @@ import { PrismaService } from '@app/database';
 import { classifyJobCategories } from '../domain/job-category-classifier.js';
 import { parseCareerPage } from '../domain/career-page.parser.js';
 import { createJobHash, normalizeLocation, normalizeTitle } from '../domain/normalize.js';
-import type { CareerPage } from '../domain/types.js';
+import type { CareerPage, CrawlResult } from '../domain/types.js';
 
 /** Persists a parsed career page atomically; fetching and scheduling belong to the caller. */
 @Injectable()
@@ -11,12 +11,14 @@ export class CrawlIngestionService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Parse before opening the transaction. Upsert at most 150 jobs using legacy hashes,
+   * Parse before opening the transaction (or ingest pre-parsed CrawlResult directly).
+   * Upsert at most 150 jobs using legacy hashes,
    * then commit the company check timestamp and success log with the same writes.
    * An empty/no-openings result never closes existing jobs after one missing crawl.
    */
-  async ingest(companyId: string, page: CareerPage) {
-    const result = parseCareerPage(companyId, page);
+  async ingest(companyId: string, pageOrResult: CareerPage | CrawlResult) {
+    const result: CrawlResult =
+      'jobs' in pageOrResult ? pageOrResult : parseCareerPage(companyId, pageOrResult);
     const checkedAt = new Date();
     let jobsCreated = 0;
     let jobsUpdated = 0;
@@ -182,9 +184,9 @@ export class CrawlIngestionService {
             checked_at: checkedAt,
             success: true,
             jobs_found: result.jobs.length,
-            http_status: page.httpStatus,
-            duration_ms: page.durationMs ?? null,
-            crawler_type: page.crawlerType ?? 'Generic HTML',
+            http_status: result.httpStatus,
+            duration_ms: result.durationMs ?? null,
+            crawler_type: result.crawlerType ?? 'Generic HTML',
             jobs_created: jobsCreated,
             jobs_updated: jobsUpdated + jobsClosed,
             action_taken: actionTaken,
@@ -204,8 +206,8 @@ export class CrawlIngestionService {
       httpStatus: result.httpStatus,
       pageHash: result.pageHash,
       noOpeningsSignal: result.noOpeningsSignal,
-      durationMs: page.durationMs,
-      crawlerType: page.crawlerType ?? 'Generic HTML',
+      durationMs: result.durationMs,
+      crawlerType: result.crawlerType ?? 'Generic HTML',
     };
   }
 

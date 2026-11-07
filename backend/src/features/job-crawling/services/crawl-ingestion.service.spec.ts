@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Test, TestingModule } from '@nestjs/testing';
 import { CrawlIngestionService } from './crawl-ingestion.service.js';
 import { PrismaService } from '@app/database';
@@ -8,7 +9,6 @@ describe('CrawlIngestionService (Reconciliation Sweep & Ingestion)', () => {
   let mockPrisma: any;
 
   const companyId = 'C001';
-  const checkedAt = new Date('2026-11-06T12:00:00Z');
 
   beforeEach(async () => {
     mockPrisma = {

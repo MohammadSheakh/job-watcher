@@ -270,8 +270,11 @@ function extractLongOpeningBlocks(
 export async function crawlGeneric(companyId: string, careerUrl: string): Promise<CrawlResult> {
   const response = await fetch(careerUrl, {
     headers: {
-      'user-agent': 'Mozilla/5.0 (compatible; JobIntelligenceBot/0.3; +daily-career-monitor)',
-      accept: 'text/html,application/xhtml+xml',
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+      accept:
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'accept-language': 'en-US,en;q=0.9',
     },
     redirect: 'follow',
     signal: AbortSignal.timeout(20_000),
@@ -290,7 +293,6 @@ export async function crawlGeneric(companyId: string, careerUrl: string): Promis
     extractAnchorJobs($, companyId, response.url, jobs, seen);
     extractTableJobs($, companyId, response.url, jobs, seen);
     extractListingSectionJobs($, companyId, response.url, jobs, seen);
-    extractLongOpeningBlocks($, companyId, response.url, jobs, seen);
   }
 
   return {
